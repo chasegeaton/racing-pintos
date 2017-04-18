@@ -40,12 +40,12 @@ loglev = logging.ERROR
 num_processes = 1
 num_tests = 1
 
-test_dir = './race-testing'
+test_dir = 'race-testing'
 pintos_dir = 'src'
 project = 'threads'
 
 processes = []
-retvals = []
+test_results = {}
 
 
 def run_tests(test_num, path, q):
@@ -69,12 +69,13 @@ def run_tests(test_num, path, q):
         logging.debug('process {} test {} check'.format(test_num, i))
         ret = subprocess.run(['make', '-C', 'build', 'check'],
                              stdout=c, stderr=c)
-        fail_count = fail_count + ret.returncode
+        passed = ret.returncode == 0
+        q.put({'proc': test_num, 'test': i, 'pass': passed})
 
     b.close()
     c.close()
 
-    q.put((test_num, fail_count))
+    q.put({'proc': test_num, 'test': None, 'pass': None})
     logging.debug('process {} finished'.format(test_num))
 
 
@@ -106,6 +107,7 @@ def main():
 
         logging.debug('created pintos directory {} at {}'.format(i, dest))
 
+        test_results[i] = {}
         p = multiprocessing.Process(target=run_tests, args=(i, dest, q),
                                     name=src_name)
         processes.append(p)
@@ -119,9 +121,16 @@ def main():
         p.start()
         logging.debug('process {} started'.format(i))
 
-    for i, p in enumerate(processes):
-        p.join()
-        logging.debug('process {} joined'.format(i))
+    done = 0
+    while done != num_processes:
+        test = q.get()
+        proc_num = test['proc']
+        if test['test'] == None:
+            processes[proc_num].join()
+            logging.debug('process {} joined'.format(proc_num))
+            done += 1
+        else:
+            test_results[proc_num][test['test']] = test['pass']
 
     delta = time.time() - start
 
@@ -133,21 +142,27 @@ def main():
     time_taken = 'testing process took: {}'.format(str(elapsed))
     print(time_taken)
 
-    while not q.empty():
-        rval = q.get()
-        retvals.append(rval)
-        logging.debug('retval: {}'.format(rval))
+    f = open('result_summary.output', 'w')
 
-    retvals.sort(key=lambda tp: tp[0])
-    with open('result_summary.output', 'w') as f:
-        for r in retvals:
-            if r[1] == 0:
-                res = 'process {}: passed'.format(r[0])
+    fails = 0
+    for i in range(num_processes):
+        title = '**** PROCESS {} ****'.format(i)
+        print(title)
+        f.write(title)
+        for t in range(num_tests):
+            if test_results[i][t]:
+                res = 'test {}: passed'.format(t)
             else:
-                res = 'process {}: FAILED with {} failed runs'.format(r[0], r[1])
+                res = 'test {}: FAILED'.format(t)
+                fails += 1
             print(res)
             f.write(res)
-        f.write(time_taken)
+
+    f.write(time_taken)
+
+    f.close()
+
+    return fails
 
 
 if __name__ == '__main__':
@@ -176,4 +191,6 @@ if __name__ == '__main__':
         logging.error('path to pintos does not exist')
         sys.exit(1)
 
-    main()
+    res = main()
+
+    sys.exit(res)
