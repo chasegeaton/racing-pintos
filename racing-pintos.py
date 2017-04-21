@@ -24,6 +24,23 @@
 
 # TODO: maybe switch over to shutil for directory removal, creation, and copying
 
+"""
+
+Script to test your PintOS project for race conditions by running many
+concurrent threads of PintOS tests.
+
+This script will start P number of worker processes that will each run a
+'make check' on the specified project T number of times.  This will put
+a heavy load on the machine. The increased load will cause the 80x86
+emulator used for PintOS to run slower which might cause race conditions
+to happen and fail tests.  This can indicate to you that you may have a
+race condition in your implementation.
+
+I don't really know if this script will really work but feel free to
+test it on your PintOS projects.
+
+"""
+
 
 import os
 import sys
@@ -53,27 +70,26 @@ def run_tests(test_num, path, q):
     os.chdir(directory)
     logging.debug('process {} in directory {}'.format(test_num, directory))
 
-    b = open('raw-test-builds.output', 'a')
-    c = open('raw-test-results.output', 'a')
-
     logging.debug('process {} starting tests'.format(test_num))
 
     fail_count = 0
     for i in range(num_tests):
         logging.debug('process {} test {} build'.format(test_num, i))
-        stat = subprocess.run(['make', '--always-make'], stdout=b, stderr=b)
+        build_filename = 'raw-test-builds-{}.output'.format(i)
+        with open(build_filename, 'w') as b:
+            stat = subprocess.run(['make', '--always-make'], stdout=b, stderr=b)
         if stat.returncode != 0:
             logging.error('pintos build error')
             sys.exit(1)
 
         logging.debug('process {} test {} check'.format(test_num, i))
-        ret = subprocess.run(['make', '-C', 'build', 'check'],
-                             stdout=c, stderr=c)
+
+        check_filename = 'raw-test-results-{}.output'.format(i)
+        with open(check_filename, 'w') as c:
+            ret = subprocess.run(['make', '-C', 'build', 'check'],
+                                stdout=c, stderr=c)
         passed = ret.returncode == 0
         q.put({'proc': test_num, 'test': i, 'pass': passed})
-
-    b.close()
-    c.close()
 
     q.put({'proc': test_num, 'test': None, 'pass': None})
     logging.debug('process {} finished'.format(test_num))
